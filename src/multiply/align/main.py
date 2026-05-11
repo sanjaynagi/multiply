@@ -6,7 +6,11 @@ import numpy as np
 
 from multiply.util.printing import print_header, print_footer
 from multiply.util.dirs import produce_dir
-from .algorithms import PrimerDimerLike
+from .algorithms import (
+    PrimerDimerLike,
+    _pairwise_scores_njit,
+    encode_primers_for_pairwise,
+)
 
 
 def align(primer_csv):
@@ -43,68 +47,42 @@ def align(primer_csv):
     model = PrimerDimerLike()
     model.load_parameters()
 
-    # COMPUTE PAIRWISE
-    # NB: Essential to keep track of ordering here.
-    print("Computing pairwise alignments...")
-    # Hoist columns out of the inner loop — pandas iloc is ~50 us per call.
+    # COMPUTE PAIRWISE — fully-jitted, prange across i.
+    # Two passes:
+    #   (1) Parallel score-only kernel: fills the symmetric (N, N) score
+    #       matrix in one shot. ~N²/2 alignments scored, but threads share
+    #       no rows so writes don't contend.
+    #   (2) Single-threaded materialisation of full PrimerAlignment objects
+    #       only for the top-K (lowest-score, most dimer-like) pairs. K is
+    #       small (SAVE_TOP=1000) so the slow Python path stays cheap.
     seqs = primer_df["seq"].to_numpy()
     names = primer_df["primer_name"].to_numpy()
-    # Bounded min-heap of the worst (lowest-score) alignments. We push
-    # `(-score, sequence_no, alignment)` so heapq's min-heap semantics give
-    # us the highest score on top, allowing efficient eviction when full.
-    # `sequence_no` is a tie-breaker so PrimerAlignment objects don't need
-    # ordering comparison once two have the same score.
-    alignments_heap: list[tuple] = []
-    seq_no = 0
-    pairwise_scores = np.zeros((n_primers, n_primers))
-    fmt_str = "  {:<4} {:<14} {:4>}/{:<4}"
-    print("  {:<4} {:<14} {:<}".format("#", "Primer", "Completed"))
-    for i in range(n_primers):
 
-        primer1_seq, primer1_name = seqs[i], names[i]
-
-        for j in range(i, n_primers):
-
-            primer2_seq, primer2_name = seqs[j], names[j]
-
-            # Align
-            model.set_primers(primer1_seq, primer2_seq, primer1_name, primer2_name)
-            model.align()
-
-            score = model.score
-            pairwise_scores[i, j] = score
-            pairwise_scores[j, i] = score
-
-            # Push into bounded heap, materialise alignment object only when retained.
-            if len(alignments_heap) < SAVE_TOP:
-                heapq.heappush(
-                    alignments_heap, (-score, seq_no, model.get_primer_alignment())
-                )
-                seq_no += 1
-            elif -score > alignments_heap[0][0]:
-                # Current alignment is *worse* (lower score, more dimer-like) than the
-                # best of the kept-set — evict the kept-best (least-bad) and add this.
-                heapq.heapreplace(
-                    alignments_heap, (-score, seq_no, model.get_primer_alignment())
-                )
-                seq_no += 1
-
-            # Inner-progress prints suppressed when stdout isn't a tty.
-            # At ~10K primers the per-step CR-overwrite balloons file logs to
-            # GBs even though only a handful of frames are user-visible.
-            if sys.stdout.isatty():
-                sys.stdout.write("\r")
-                sys.stdout.flush()
-                sys.stdout.write(fmt_str.format(i + 1, primer1_name, j + 1, n_primers))
-        if sys.stdout.isatty():
-            sys.stdout.write("\r")
-            sys.stdout.flush()
-    print("\nDone.\n")
-
-    # Materialise the kept alignments in ascending-score order (lowest score == worst).
-    alignments = sorted(
-        (a for _, _, a in alignments_heap), key=lambda a: a.score
+    print("Computing pairwise alignments (parallel score kernel)...")
+    fwd, rev, lengths = encode_primers_for_pairwise(seqs)
+    pairwise_scores = _pairwise_scores_njit(
+        fwd, rev, lengths, model._nn_lut, model.end_length, model.end_bonus,
     )
+    print("  Score matrix complete.")
+
+    print(f"Materialising top-{SAVE_TOP} worst-scoring alignments...")
+    # Pull the lower triangle off (i <= j) to deduplicate the symmetric pairs.
+    iu, ju = np.triu_indices(n_primers)
+    flat_scores = pairwise_scores[iu, ju]
+    # argpartition picks the SAVE_TOP smallest (lowest-score, most dimer-like)
+    # in O(N²) without sorting all pairs.
+    k = min(SAVE_TOP, flat_scores.shape[0])
+    worst_flat_ix = np.argpartition(flat_scores, k - 1)[:k]
+    worst_i = iu[worst_flat_ix]
+    worst_j = ju[worst_flat_ix]
+
+    alignments = []
+    for i, j in zip(worst_i.tolist(), worst_j.tolist()):
+        model.set_primers(seqs[i], seqs[j], names[i], names[j])
+        model.align()
+        alignments.append(model.get_primer_alignment())
+    alignments.sort(key=lambda a: a.score)
+    print("  Done.\n")
 
     # SAVE AS CSV
     print("Saving outputs...")

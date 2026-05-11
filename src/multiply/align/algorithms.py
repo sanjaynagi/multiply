@@ -1,6 +1,6 @@
 import json
 import numpy as np
-from numba import njit
+from numba import njit, prange
 from numba.typed import Dict
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
@@ -125,6 +125,156 @@ def _align_njit(l_arr, s_arr, nn_lut, end_length, end_bonus):
             best_start = i
 
     return best_score, best_start
+
+
+def encode_primers_for_pairwise(seqs):
+    """Pack a list of primer sequences for the parallel pairwise kernel.
+
+    Returns three arrays: forward-encoded (``N, max_len``), reverse-encoded
+    (same shape, zero-padded right), and integer lengths. The reverse array
+    mirrors the ``s = s[::-1]`` step in :py:meth:`PrimerDimerLike.align`:
+    the shorter primer is reversed before pairwise alignment so 3'-end
+    overhangs are evaluated correctly.
+
+    Parameters
+    ----------
+    seqs : Sequence[str]
+        Primer sequences in original order.
+
+    Returns
+    -------
+    fwd : np.ndarray, shape (N, max_len), dtype int8
+    rev : np.ndarray, shape (N, max_len), dtype int8
+        Reverse of ``fwd`` per row, left-aligned within the row's ``length``.
+    lengths : np.ndarray, shape (N,), dtype int32
+    """
+    n = len(seqs)
+    lengths = np.array([len(s) for s in seqs], dtype=np.int64)
+    max_len = int(lengths.max()) if n else 0
+    fwd = np.zeros((n, max_len), dtype=np.int8)
+    rev = np.zeros((n, max_len), dtype=np.int8)
+    for i, seq in enumerate(seqs):
+        enc = _encode_seq(seq)
+        L = enc.shape[0]
+        fwd[i, :L] = enc
+        rev[i, :L] = enc[::-1]
+    return fwd, rev, lengths
+
+
+@njit(cache=True)
+def _score_pair_njit(l_arr, s_arr, nL, nS, nn_lut, end_length, end_bonus):
+    """Score one primer pair from pre-encoded slices. Helper for the prange
+    kernel; mirrors :func:`_align_njit` but reads the longer/shorter
+    decision through int64 indices rather than (l_idx, s_idx) tuples that
+    confuse numba's parfor type inference.
+    """
+    best_score = 10.0
+
+    for k_off in range(nL - 1):
+        current_score = 0.0
+        match_len = 0
+        for jj in range(nS - 1):
+            l1 = l_arr[k_off + jj]
+            l2 = l_arr[k_off + jj + 1]
+            s1 = s_arr[jj]
+            s2 = s_arr[jj + 1]
+            current_score += nn_lut[(l1 * 4 + l2) * 16 + (s1 * 4 + s2)]
+            match_len = jj + 1
+            if k_off + jj == nL - 2:
+                break
+        match_len += 1
+
+        overhang_left = k_off > 0
+        overhang_right = match_len < nS
+
+        left_end = 0
+        if overhang_left:
+            for kk in range(end_length):
+                if kk >= match_len:
+                    break
+                pos_l = k_off + kk
+                pos_s = kk
+                if pos_s < nS and pos_l < nL:
+                    if _RC_INT[s_arr[pos_s]] != l_arr[pos_l]:
+                        break
+                    left_end += 1
+                else:
+                    break
+
+        right_end = 0
+        if overhang_right:
+            for kk in range(end_length):
+                if kk >= match_len:
+                    break
+                idx_ = match_len - 1 - kk
+                pos_l = k_off + idx_
+                pos_s = idx_
+                if pos_s >= 0 and pos_l >= 0 and pos_s < nS and pos_l < nL:
+                    if _RC_INT[s_arr[pos_s]] != l_arr[pos_l]:
+                        break
+                    right_end += 1
+                else:
+                    break
+
+        current_score += (left_end + right_end) * end_bonus
+
+        if current_score <= best_score:
+            best_score = current_score
+
+    return best_score
+
+
+@njit(parallel=True, cache=True)
+def _pairwise_scores_njit(fwd, rev, lengths, nn_lut, end_length, end_bonus):
+    """Fill the (N, N) primer-dimer score matrix in parallel via ``prange``.
+
+    Each thread iterates over disjoint rows of ``i`` (the outer ``prange``)
+    and writes the upper-triangle cells of row ``i`` plus the mirrored
+    ``scores[j, i]`` cell. No two threads write the same (i, j), so the
+    parfor is contention-free without atomics.
+
+    Mirrors :py:meth:`PrimerDimerLike.align` for every (i, j) with ``j >= i``,
+    deciding longer-vs-shorter the same way ``set_primers`` does (sort by
+    length descending; on ties, primer1 wins — here that maps to taking the
+    row with the lower index).
+
+    Parameters
+    ----------
+    fwd, rev : np.ndarray, shape (N, max_len), dtype int8
+        Output of :func:`encode_primers_for_pairwise`.
+    lengths : np.ndarray, shape (N,), dtype int64
+    nn_lut : np.ndarray, shape (256,), dtype float32
+        Flat dinucleotide nearest-neighbour table.
+    end_length : int
+    end_bonus : float
+
+    Returns
+    -------
+    scores : np.ndarray, shape (N, N), dtype float64
+        Symmetric primer-dimer score matrix.
+    """
+    n = fwd.shape[0]
+    scores = np.zeros((n, n), dtype=np.float64)
+
+    for i in prange(n):
+        Li = lengths[i]
+        for j in range(i, n):
+            Lj = lengths[j]
+            # Pass the longer primer's row as l_arr, shorter as s_arr.
+            # On ties, l = i (primer1 by index — matches set_primers' stable
+            # sort).
+            if Li >= Lj:
+                score = _score_pair_njit(
+                    fwd[i], rev[j], Li, Lj, nn_lut, end_length, end_bonus
+                )
+            else:
+                score = _score_pair_njit(
+                    fwd[j], rev[i], Lj, Li, nn_lut, end_length, end_bonus
+                )
+            scores[i, j] = score
+            scores[j, i] = score
+
+    return scores
 
 
 # ================================================================================
