@@ -36,7 +36,11 @@ def pipeline(design):
         view(result_dir=params["output_dir"], genome_name=params["genome"])
     except Exception as exc:
         print(f"WARNING: `multiply view` failed ({type(exc).__name__}: {exc}); continuing.")
-    snpcheck(primer_csv=primer_csv, genome_name=params["genome"])
+    snpcheck(
+        primer_csv=primer_csv,
+        genome_name=params["genome"],
+        backend_config=params.get("snpcheck"),
+    )
     align(primer_csv=primer_csv)
     blast(primer_csv=primer_csv, genome_name=params["genome"])
     select(result_dir=params["output_dir"], algorithm="Greedy")

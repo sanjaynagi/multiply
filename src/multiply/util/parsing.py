@@ -28,6 +28,7 @@ def parse_parameters(design_path):
     params = add_regions(config, params)
     params = add_primers(config, params)
     params = add_amplicons(config, params)
+    params = add_snpcheck(config, params)
     params = add_outputs(config, params)
 
     check_genes_or_regions(params)
@@ -255,6 +256,53 @@ def add_amplicons(config, params, min_size_bp=50, max_size_bp=10000):
     else:
         params["primer3_settings"] = ["default"]
 
+    return params
+
+
+def add_snpcheck(config, params):
+    """Add optional [SNPCheck] section to a parameter dictionary.
+
+    A design without a [SNPCheck] section keeps the legacy behaviour
+    (bedtools backend driven by ``genome.include_variation``).
+
+    Recognised keys (all optional, with defaults):
+      - backend: 'bedtools' (default) | 'malariagen'
+      - species: 'gambiae_sl' | 'funestus' (malariagen only)
+      - sample_sets: malariagen_data sample-set or release identifier
+      - sample_query: pandas query string for cohort selection
+      - site_mask: malariagen_data site_mask name
+      - maf_threshold: float, default 0.05
+      - three_prime_bp: int, default 5
+      - region_pad_bp: int, default 0
+    """
+    if not config.has_section("SNPCheck"):
+        params["snpcheck"] = {"backend": "bedtools"}
+        return params
+
+    section = "SNPCheck"
+    snpcheck = {
+        "backend": config.get(section, "backend", fallback="bedtools").strip().lower(),
+    }
+    # ``site_mask`` and ``sample_query`` accept the sentinel ``None``/empty
+    # to disable: e.g. heterochromatic loci where the mask removes most
+    # positions, so masked-out bases get treated as zero-AF and primers
+    # there look spuriously clean.
+    _NONE_TOKENS = {"", "none", "null"}
+    for key in ("species", "sample_sets", "sample_query", "site_mask"):
+        if config.has_option(section, key):
+            raw = config.get(section, key)
+            if key in ("site_mask", "sample_query") and raw.strip().lower() in _NONE_TOKENS:
+                snpcheck[key] = None
+            else:
+                snpcheck[key] = raw
+    if config.has_option(section, "maf_threshold"):
+        snpcheck["maf_threshold"] = config.getfloat(section, "maf_threshold")
+    if config.has_option(section, "three_prime_bp"):
+        snpcheck["three_prime_bp"] = config.getint(section, "three_prime_bp")
+    if config.has_option(section, "region_pad_bp"):
+        snpcheck["region_pad_bp"] = config.getint(section, "region_pad_bp")
+
+    params["snpcheck"] = snpcheck
     return params
 
 

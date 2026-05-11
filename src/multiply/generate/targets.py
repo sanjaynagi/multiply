@@ -168,14 +168,14 @@ class TargetSet:
             if left.chrom != right.chrom:
                 continue
 
-            # Ensure targets themselves do not overlap
+            # Tiled-geometry support: overlapping targets are allowed and leave
+            # pads independent. Each tile's primers can sit inside its
+            # neighbour's body — that is the intended overlap geometry.
             bp_bw_targets = right.start - left.end
             if bp_bw_targets <= 0:
-                raise TargetPositionError(
-                    f"Targets {left.ID} and {right.ID} overlap. Cannot build multiplex."
-                )
+                continue
 
-            # Check if pads overlap
+            # Check if pads overlap (for non-overlapping-but-close clustered targets)
             bp_bw_pads = right.pad_start - left.pad_end
             if bp_bw_pads <= 0:
                 print(f"Pads overlap between {left.ID} and {right.ID}")
