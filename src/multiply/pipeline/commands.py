@@ -29,7 +29,13 @@ def pipeline(design):
 
     # Pipeline
     generate(design=design)
-    view(result_dir=params["output_dir"], genome_name=params["genome"])
+    # `view` is plotting-only; large tiled panels can defeat matplotlib's
+    # GridSpec sizing. Treat as best-effort so the rest of the pipeline still
+    # produces the design tables we actually consume downstream.
+    try:
+        view(result_dir=params["output_dir"], genome_name=params["genome"])
+    except Exception as exc:
+        print(f"WARNING: `multiply view` failed ({type(exc).__name__}: {exc}); continuing.")
     snpcheck(primer_csv=primer_csv, genome_name=params["genome"])
     align(primer_csv=primer_csv)
     blast(primer_csv=primer_csv, genome_name=params["genome"])
