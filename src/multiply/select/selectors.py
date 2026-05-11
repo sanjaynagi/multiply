@@ -4,7 +4,7 @@ import numpy as np
 from itertools import product
 from functools import reduce
 from abc import ABC, abstractmethod
-from numba import njit
+from numba import njit, prange
 from .multiplex import Multiplex
 
 
@@ -84,6 +84,62 @@ def _greedy_search_njit(
         # the python wrapper reshuffles into target_id order if needed.
         for slot in range(n_targets):
             all_multiplexes[it, target_perm[slot]] = chosen[slot]
+        all_costs[it] = indv_sum + pairwise_sum
+
+    return all_multiplexes, all_costs
+
+
+# ================================================================================
+# Numba-jitted random multiplex search (the benchmark control).
+#
+# Used to give the greedy a statistical reference: at each random multiplex,
+# pick one candidate primer-pair uniformly per target, evaluate the LinearCost,
+# and keep the cost (and multiplex indices) for downstream plot + comparison.
+#
+# Iterations are independent so the outer loop runs in `prange`. Each iteration
+# evaluates the cost directly via two nested loops over the chosen multiplex
+# of size `n_targets`:
+#   cost = Σ_t indv[c_t]  +  Σ_{a,b} pairwise[c_a, c_b]
+# matching :py:meth:`LinearCost.calc_cost`'s
+# `indv[ix].sum() + pairwise[ix][:, ix].sum()` (i.e. full K×K sum including
+# the symmetric off-diagonal and the diagonal twice).
+# ================================================================================
+
+
+@njit(parallel=True, cache=True)
+def _random_search_njit(
+    N,
+    cand_indices_flat,
+    cand_starts,
+    cand_lens,
+    indv_arr,
+    pairwise_arr,
+):
+    n_targets = cand_starts.shape[0]
+    all_multiplexes = np.empty((N, n_targets), dtype=np.int64)
+    all_costs = np.empty(N, dtype=np.float64)
+
+    for it in prange(N):
+        chosen = np.empty(n_targets, dtype=np.int64)
+        for t in range(n_targets):
+            length = cand_lens[t]
+            start = cand_starts[t]
+            k = np.random.randint(0, length)
+            chosen[t] = cand_indices_flat[start + k]
+
+        indv_sum = 0.0
+        for t in range(n_targets):
+            indv_sum += indv_arr[chosen[t]]
+
+        pairwise_sum = 0.0
+        for a in range(n_targets):
+            ca = chosen[a]
+            row = pairwise_arr[ca]
+            for b in range(n_targets):
+                pairwise_sum += row[chosen[b]]
+
+        for t in range(n_targets):
+            all_multiplexes[it, t] = chosen[t]
         all_costs[it] = indv_sum + pairwise_sum
 
     return all_multiplexes, all_costs
@@ -267,35 +323,67 @@ class BruteForce(MultiplexSelector):
 
 
 class RandomSearch(MultiplexSelector):
+    """Random-multiplex baseline used by `select` as the greedy's control.
+
+    Drives :func:`_random_search_njit` — a ``prange``-parallel, numba-jitted
+    kernel that picks one candidate primer-pair uniformly per target and
+    scores the resulting multiplex against the LinearCost arrays
+    ``indv_combined_arr`` / ``pairwise_combined_arr``. The Python wrapper
+    only does the flattening + Multiplex materialisation; the inner loop
+    no longer pays per-iteration `cost_function.calc_cost` overhead, which
+    at panel scale (~1050 targets, ~10K random multiplexes) dominated
+    `select`'s wall time.
+    """
+
     def run(self, N=10_000):
-        """Run the random  selection algorithm"""
-        # Get target pairs
+        # Build target → candidate primer-pair indices, in the same shape
+        # the greedy kernel uses (flat indices + per-target offsets).
+        ix_lookup = self.cost_function._primer_pair_ix
         target_pairs = {
             target_id: list(set(target_df["pair_name"]))
             for target_id, target_df in self.primer_df.groupby("target_id")
         }
+        target_ids = list(target_pairs)
+        n_targets = len(target_ids)
 
-        # Iterate
-        multiplexes = []
-        sys.stdout.write(f"  Iterations complete: {0}/{N}")
-        for ix in range(N):
+        cand_indices_flat = np.fromiter(
+            (ix_lookup[p] for tid in target_ids for p in target_pairs[tid]),
+            dtype=np.int64,
+            count=sum(len(target_pairs[tid]) for tid in target_ids),
+        )
+        cand_lens = np.array(
+            [len(target_pairs[tid]) for tid in target_ids], dtype=np.int64
+        )
+        cand_starts = np.empty(n_targets, dtype=np.int64)
+        if n_targets > 0:
+            cand_starts[0] = 0
+            cand_starts[1:] = np.cumsum(cand_lens)[:-1]
 
-            # Randomly generate a multiplex
-            multiplex = [random.choice(pairs) for _, pairs in target_pairs.items()]
+        idx_to_pair = {v: k for k, v in ix_lookup.items()}
 
-            # Compute the cost
-            cost = self.cost_function.calc_cost(multiplex)
+        print(f"  Running {N} parallel random iterations (numba)...")
+        all_multiplexes, all_costs = _random_search_njit(
+            N,
+            cand_indices_flat,
+            cand_starts,
+            cand_lens,
+            self.cost_function.indv_combined_arr,
+            self.cost_function.pairwise_combined_arr,
+        )
+        print(f"  Done. Best cost: {all_costs.min():.4f}, "
+              f"worst: {all_costs.max():.4f}, mean: {all_costs.mean():.4f}")
 
-            # Store
-            multiplexes.append(Multiplex(cost=cost, primer_pairs=multiplex))
-
-            # Print (gated on tty to avoid log-bloat under file redirect).
-            if sys.stdout.isatty():
-                sys.stdout.write("\r")
-                sys.stdout.flush()
-                sys.stdout.write(f"  Iterations complete: {ix+1}/{N}")
-        print("\nDone.\n")
-
+        # Materialise Multiplex objects (target order matches `target_ids`).
+        multiplexes = [
+            Multiplex(
+                cost=float(all_costs[it]),
+                primer_pairs=[
+                    idx_to_pair[int(all_multiplexes[it, t])]
+                    for t in range(n_targets)
+                ],
+            )
+            for it in range(N)
+        ]
         return multiplexes
 
 
