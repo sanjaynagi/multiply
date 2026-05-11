@@ -5,7 +5,7 @@ from itertools import product
 from functools import reduce
 from abc import ABC, abstractmethod
 from numba import njit, prange
-from .multiplex import Multiplex
+from .multiplex import Multiplex, MultiplexResults
 
 
 # ================================================================================
@@ -250,20 +250,16 @@ class GreedySearch(MultiplexSelector):
         print(f"  Done. Best cost: {all_costs.min():.4f}, "
               f"worst: {all_costs.max():.4f}, mean: {all_costs.mean():.4f}")
 
-        # Materialise Multiplex objects. `all_multiplexes[it]` is indexed by
-        # target slot in `target_ids` order (the jitted kernel reshuffled
-        # back from its internal permutation).
-        multiplexes = [
-            Multiplex(
-                cost=float(all_costs[it]),
-                primer_pairs=[
-                    idx_to_pair[int(all_multiplexes[it, t])]
-                    for t in range(n_targets)
-                ],
-            )
-            for it in range(N)
-        ]
-        return multiplexes
+        # Hand off arrays + idx_to_pair directly. MultiplexExplorer will
+        # dedup/sort using the indices array and materialise full Multiplex
+        # objects only for the top-N picks. Avoids the 10K-object list
+        # comprehension that dominated select's wall time at panel scale.
+        return MultiplexResults(
+            all_indices=all_multiplexes,
+            all_costs=all_costs,
+            idx_to_pair=idx_to_pair,
+            n_targets=n_targets,
+        )
 
 
 class BruteForce(MultiplexSelector):
@@ -373,18 +369,12 @@ class RandomSearch(MultiplexSelector):
         print(f"  Done. Best cost: {all_costs.min():.4f}, "
               f"worst: {all_costs.max():.4f}, mean: {all_costs.mean():.4f}")
 
-        # Materialise Multiplex objects (target order matches `target_ids`).
-        multiplexes = [
-            Multiplex(
-                cost=float(all_costs[it]),
-                primer_pairs=[
-                    idx_to_pair[int(all_multiplexes[it, t])]
-                    for t in range(n_targets)
-                ],
-            )
-            for it in range(N)
-        ]
-        return multiplexes
+        return MultiplexResults(
+            all_indices=all_multiplexes,
+            all_costs=all_costs,
+            idx_to_pair=idx_to_pair,
+            n_targets=n_targets,
+        )
 
 
 # ================================================================================

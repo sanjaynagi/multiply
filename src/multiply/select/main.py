@@ -16,6 +16,10 @@ from .plot import plot_explorer_costs
 INDV_INI_PATH = f"{ROOT_DIR}/settings/select/individual_costs.ini"
 PAIR_INI_PATH = f"{ROOT_DIR}/settings/select/pairwise_costs.ini"
 N_SELECT = 3
+# Per-multiplex pairwise-interaction PDF is a primer×primer matshow. Beyond
+# a few hundred primers the cells become unreadable and the PDF render
+# dominates select's wall time. Skip it past this size and emit a note.
+MAX_PRIMERS_FOR_PAIRWISE_PDF = 250
 
 
 def select(result_dir, algorithm):
@@ -77,7 +81,7 @@ def select(result_dir, algorithm):
     # Benchmark with random algorithm
     print("Benchmarking search performance with random search...")
     rnd_selector = selector_collection["Random"](primer_df, cost_function)
-    rnd_multiplexes = rnd_selector.run(N=len(explorer.uniq_multiplexes))
+    rnd_multiplexes = rnd_selector.run(N=explorer.N_uniq)
 
     # Prepare to explore random results
     rnd_explorer = MultiplexExplorer(primer_df, rnd_multiplexes)
@@ -85,10 +89,11 @@ def select(result_dir, algorithm):
 
     # EXPLORING RESULTS
     print("Exploring search results...")
-    algo_costs = [
-        m.cost for m in explorer.uniq_multiplexes
-    ]  # NB: only looking at unique
-    rnd_costs = [m.cost for m in rnd_explorer.uniq_multiplexes]
+    # `uniq_costs` is a numpy array kept by MultiplexExplorer alongside the
+    # de-duplicated multiplex set; using it directly avoids materialising
+    # ~N_uniq Multiplex Python objects just to read their cost field.
+    algo_costs = explorer.uniq_costs
+    rnd_costs = rnd_explorer.uniq_costs
     print(f"  {'Algorithm':>10}  {'Mean Cost':>10}  {'Lowest Cost':>10}")
     print(
         f"  {algorithm:>10}  {np.mean(algo_costs):>10.3f}  {np.min(algo_costs):>10.3f}"
@@ -140,13 +145,19 @@ def select(result_dir, algorithm):
             f"{multiplex_output_dir}/amplicons.{multiplex_name}.bed"
         )
 
-        # Get pairwise dataframe
-        pairwise_df = pairwise_costs[0].primer_values.loc[primer_names, primer_names]
-        visualise_pairwise_costs(
-            pairwise_df,
-            cbar_title="Interaction Score",
-            output_path=f"{multiplex_output_dir}/plot.{multiplex_name}.primer_interactions.pdf",
-        )
+        # Get pairwise dataframe + render the heatmap PDF only when small.
+        if len(primer_names) <= MAX_PRIMERS_FOR_PAIRWISE_PDF:
+            pairwise_df = pairwise_costs[0].primer_values.loc[primer_names, primer_names]
+            visualise_pairwise_costs(
+                pairwise_df,
+                cbar_title="Interaction Score",
+                output_path=f"{multiplex_output_dir}/plot.{multiplex_name}.primer_interactions.pdf",
+            )
+        else:
+            print(
+                f"  Skipping pairwise-costs PDF for {multiplex_name}: "
+                f"n_primers={len(primer_names)} > {MAX_PRIMERS_FOR_PAIRWISE_PDF}."
+            )
         multiplex_align_df = alignments_df.query(
             "primer1_name in @primer_names and primer2_name in @primer_names"
         )
