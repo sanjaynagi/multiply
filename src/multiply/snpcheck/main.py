@@ -98,8 +98,15 @@ def _snpcheck_bedtools(primer_csv, genome_name):
 
 
 def _snpcheck_malariagen(primer_csv, backend_config):
-    """Cohort-aware snpcheck via malariagen_data.snp_calls."""
-    from agam_tiled_ampseq.malariagen_snpcheck import (
+    """Cohort-aware snpcheck via malariagen_data allele counts.
+
+    Each taxon in ``taxa`` is scored separately and the per-base maximum alt
+    allele frequency is kept, so a variant common in a single species is not
+    diluted by pooling. See ``udzuzu.malariagen_snpcheck`` for the measurements
+    behind the taxa and site-mask defaults.
+    """
+    from udzuzu.malariagen_snpcheck import (
+        DEFAULT_TAXA,
         score_primers_by_cohort,
         write_snp_counts_csv,
     )
@@ -112,8 +119,11 @@ def _snpcheck_malariagen(primer_csv, backend_config):
 
     species = backend_config.get("species", "gambiae_sl")
     sample_sets = backend_config.get("sample_sets", "3.0")
-    sample_query = backend_config.get("sample_query")
-    site_mask = backend_config.get("site_mask", "gamb_colu_arab")
+    taxa = backend_config.get("taxa") or DEFAULT_TAXA
+    # Default no mask: a masked-out position is absent from the calls, so a
+    # dense per-base track reads *unknown* as *clean*. Measured on this panel,
+    # the mask hides a variant in 51% of primer zones.
+    site_mask = backend_config.get("site_mask")
     maf_threshold = float(backend_config.get("maf_threshold", 0.05))
     three_prime_bp = int(backend_config.get("three_prime_bp", 5))
     region_pad_bp = int(backend_config.get("region_pad_bp", 0))
@@ -121,7 +131,7 @@ def _snpcheck_malariagen(primer_csv, backend_config):
     print("Cohort:")
     print(f"  species       = {species}")
     print(f"  sample_sets   = {sample_sets}")
-    print(f"  sample_query  = {sample_query}")
+    print(f"  taxa          = {', '.join(taxa)} (scored separately, worst case kept)")
     print(f"  site_mask     = {site_mask}")
     print(f"  maf_threshold = {maf_threshold}")
     print(f"  three_prime_bp = {three_prime_bp}")
@@ -133,7 +143,7 @@ def _snpcheck_malariagen(primer_csv, backend_config):
         primer_df=primer_df,
         species=species,
         sample_sets=sample_sets,
-        sample_query=sample_query,
+        taxa=taxa,
         site_mask=site_mask,
         maf_threshold=maf_threshold,
         three_prime_bp=three_prime_bp,

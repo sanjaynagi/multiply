@@ -269,8 +269,10 @@ def add_snpcheck(config, params):
       - backend: 'bedtools' (default) | 'malariagen'
       - species: 'gambiae_sl' | 'funestus' (malariagen only)
       - sample_sets: malariagen_data sample-set or release identifier
-      - sample_query: pandas query string for cohort selection
-      - site_mask: malariagen_data site_mask name
+      - taxa: comma-separated taxon names, scored separately and combined
+        worst-case (default: gambiae, coluzzii, arabiensis)
+      - site_mask: malariagen_data site_mask name (default: none -- masking
+        makes unknown sites look clean)
       - maf_threshold: float, default 0.05
       - three_prime_bp: int, default 5
       - region_pad_bp: int, default 0
@@ -288,13 +290,17 @@ def add_snpcheck(config, params):
     # positions, so masked-out bases get treated as zero-AF and primers
     # there look spuriously clean.
     _NONE_TOKENS = {"", "none", "null"}
-    for key in ("species", "sample_sets", "sample_query", "site_mask"):
+    for key in ("species", "sample_sets", "site_mask"):
         if config.has_option(section, key):
             raw = config.get(section, key)
-            if key in ("site_mask", "sample_query") and raw.strip().lower() in _NONE_TOKENS:
+            if key == "site_mask" and raw.strip().lower() in _NONE_TOKENS:
                 snpcheck[key] = None
             else:
                 snpcheck[key] = raw
+    if config.has_option(section, "taxa"):
+        snpcheck["taxa"] = tuple(
+            name.strip() for name in config.get(section, "taxa").split(",") if name.strip()
+        )
     if config.has_option(section, "maf_threshold"):
         snpcheck["maf_threshold"] = config.getfloat(section, "maf_threshold")
     if config.has_option(section, "three_prime_bp"):
