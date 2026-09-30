@@ -138,7 +138,10 @@ def load_primer_pairs_from_primer3_output(primer3_output_path, add_target=None):
 
     # Parse primer3 output
     with open(primer3_output_path, "r") as f:
-        # Iterate until determine number of primers returned
+        # Iterate until determine number of primers returned. primer3 omits
+        # the count entirely when it rejects the input (for example a target
+        # that runs off the end of the contig); treat that as no primers.
+        n_returned = 0
         for line in f:
             if line.startswith("PRIMER_PAIR_NUM_RETURNED"):
                 n_returned = int(line.strip().split("=")[1])

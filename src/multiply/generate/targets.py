@@ -83,7 +83,8 @@ class Target:
         if clearance_bp is not None:
             self.clearance_bp = clearance_bp
         pad = max_size_bp / 2
-        self.pad_start = int(self.start - self.clearance_bp - pad)
+        # A target near a contig start cannot have a pad before base 0
+        self.pad_start = max(0, int(self.start - self.clearance_bp - pad))
         self.pad_end = int(self.end + self.clearance_bp + pad)
 
         return self
@@ -96,18 +97,25 @@ class Target:
         """
 
         self.pads_included = include_pads
+
+        # Define start and end of sequence to extract
+        if include_pads:
+            if not self.pad_end:  # pad_start may legitimately be 0
+                raise ValueError(
+                    "If `include_pads` is True, must run `.calc_pads()` first."
+                )
+            start, end = self.pad_start, self.pad_end
+        else:
+            start, end = self.start, self.end
+
+        if end <= start:
+            raise TargetPositionError(
+                f"{self.ID}: no room left for primers (pad region {start}-{end}); "
+                "its pads were squeezed by neighbouring targets. "
+                "Set `adjust_overlapping_pads = False` in [Amplicons] for dense designs."
+            )
+
         with pysam.FastaFile(reference_fasta_path) as fasta:
-
-            # Define start and end of sequence to extract
-            if include_pads:
-                if not self.pad_start or not self.pad_end:
-                    raise ValueError(
-                        "If `include_pads` is True, must run `.calc_pads()` first."
-                    )
-                start, end = self.pad_start, self.pad_end
-            else:
-                start, end = self.start, self.end
-
             self.seq = fasta.fetch(self.chrom, start, end)
 
         return self
@@ -252,8 +260,16 @@ class TargetSet:
                 right.pad_start = middle_point + 1
                 left.pad_end = middle_point
 
-    def calc_pads(self, max_size_bp=None, clearance_bp=0):
-        """Calculate pads consistently across all targets"""
+    def calc_pads(self, max_size_bp=None, clearance_bp=0, adjust_overlaps=True):
+        """
+        Calculate pads consistently across all targets
+
+        With `adjust_overlaps`, close targets whose pads overlap have the gap
+        split between them, so a target's primers stay on its own side. Turn
+        it off for densely tiled designs: squeezing the pads of targets a few
+        hundred bp apart can leave no room for an amplicon, whereas overlapping
+        amplicons are the intended geometry there.
+        """
 
         if max_size_bp is not None:
             self.max_size_bp = max_size_bp
@@ -263,7 +279,8 @@ class TargetSet:
             target.calc_pads(max_size_bp=self.max_size_bp, clearance_bp=clearance_bp)
 
         # Adjust any overlapping pads, if necesssary
-        self._adjust_overlapping_pads()
+        if adjust_overlaps:
+            self._adjust_overlapping_pads()
 
         return self
 

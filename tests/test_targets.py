@@ -1,5 +1,6 @@
 import pytest
 from multiply.generate.targets import Target, TargetSet
+from multiply.util.exceptions import TargetPositionError
 from multiply.generate.primer3 import Primer3Runner
 from multiply.util.exceptions import TargetSizeError
 
@@ -62,3 +63,29 @@ def test_zero_clearance_is_the_previous_behaviour():
     t.calc_pads(2500)
     assert (t.clear_start, t.clear_length) == (10_000, 500)
     assert (t.pad_start, t.pad_end) == (8750, 11_750)
+
+
+def test_pad_is_clamped_at_the_contig_start():
+    t = _target(500, 501)
+    t.calc_pads(2500, clearance_bp=150)
+    assert t.pad_start == 0
+    assert t.pad_end == 501 + 150 + 1250
+
+
+def test_close_targets_share_their_pads_by_default():
+    a, b = _target(10_000, 10_500, "a"), _target(11_000, 11_500, "b")
+    ts = TargetSet([a, b]).calc_pads(max_size_bp=2500)
+    assert a.pad_end < b.pad_start
+
+
+def test_pad_adjustment_can_be_turned_off_for_dense_designs():
+    a, b = _target(10_000, 10_500, "a"), _target(11_000, 11_500, "b")
+    TargetSet([a, b]).calc_pads(max_size_bp=2500, adjust_overlaps=False)
+    assert a.pad_end == 10_500 + 1250 and b.pad_start == 11_000 - 1250
+
+
+def test_squeezed_out_target_fails_loudly_not_with_an_empty_sequence():
+    t = _target(10_000, 10_500)
+    t.pad_start, t.pad_end = 10_600, 10_600
+    with pytest.raises(TargetPositionError):
+        t.extract_seq("unused.fa")

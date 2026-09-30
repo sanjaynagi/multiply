@@ -107,7 +107,7 @@ def _snpcheck_malariagen(primer_csv, backend_config):
     """
     from udzuzu.malariagen_snpcheck import (
         DEFAULT_TAXA,
-        score_primers_by_cohort,
+        score_multiply_candidates,
         write_snp_counts_csv,
     )
 
@@ -127,6 +127,7 @@ def _snpcheck_malariagen(primer_csv, backend_config):
     maf_threshold = float(backend_config.get("maf_threshold", 0.05))
     three_prime_bp = int(backend_config.get("three_prime_bp", 5))
     region_pad_bp = int(backend_config.get("region_pad_bp", 0))
+    n_workers = int(backend_config.get("n_workers", 1))
     cache_dir = backend_config.get("cache_dir") or f"{input_dir}/snpcheck/af_cache"
 
     print("Cohort:")
@@ -138,13 +139,14 @@ def _snpcheck_malariagen(primer_csv, backend_config):
     print(f"  three_prime_bp = {three_prime_bp}")
     print(f"  region_pad_bp = {region_pad_bp}")
     print(f"  cache_dir     = {cache_dir}")
+    print(f"  n_workers     = {n_workers}")
     print(f"  primers       = {len(primer_df)}")
 
     print("Fetching SNP calls + scoring primers...")
-    # `multiply generate` reports 0-based primer starts (primer3 offset plus the
-    # 0-based BED pad start); the scorer takes 1-based sense coordinates.
-    scores_df = score_primers_by_cohort(
-        primer_df=primer_df.assign(start=primer_df["start"] + 1),
+    # The scorer handles multiply's 0-based primer starts itself.
+    scores_df = score_multiply_candidates(
+        primer_df=primer_df,
+        n_workers=n_workers,
         species=species,
         sample_sets=sample_sets,
         taxa=taxa,

@@ -255,6 +255,11 @@ def add_amplicons(config, params, min_size_bp=50, max_size_bp=10000):
     if params["target_clearance_bp"] < 0:
         raise DesignFileError("In [Amplicons], target_clearance_bp must be >= 0.")
 
+    # Split the gap between close targets' primer pads (legacy default: on)
+    params["adjust_overlapping_pads"] = config.getboolean(
+        "Amplicons", "adjust_overlapping_pads", fallback=True
+    )
+
     # Split targets longer than this into abutting sub-targets (None: reject them)
     params["max_target_bp"] = (
         config.getint("Amplicons", "max_target_bp")
@@ -297,6 +302,7 @@ def add_snpcheck(config, params):
       - maf_threshold: float, default 0.05
       - three_prime_bp: int, default 5
       - region_pad_bp: int, default 0
+      - n_workers: int, default 1; parallel allele-frequency fetch processes
       - cache_dir: directory for cached allele-frequency tracks
         (default: <output>/snpcheck/af_cache)
     """
@@ -330,6 +336,8 @@ def add_snpcheck(config, params):
         snpcheck["three_prime_bp"] = config.getint(section, "three_prime_bp")
     if config.has_option(section, "region_pad_bp"):
         snpcheck["region_pad_bp"] = config.getint(section, "region_pad_bp")
+    if config.has_option(section, "n_workers"):
+        snpcheck["n_workers"] = config.getint(section, "n_workers")
     if config.has_option(section, "cache_dir"):
         snpcheck["cache_dir"] = config.get(section, "cache_dir").strip()
 

@@ -94,7 +94,9 @@ def generate(design):
     target_set = (
         target_set
         .check_size_compatible(params["max_size_bp"], clearance_bp=clearance_bp)
-        .calc_pads(clearance_bp=clearance_bp)
+        .calc_pads(
+            clearance_bp=clearance_bp, adjust_overlaps=params["adjust_overlapping_pads"]
+        )
         .extract_seqs(genome.fasta_path, include_pads=True)
         .to_csv(f"{params['output_dir']}/table.targets_overview.csv")
         .to_fasta(f"{params['output_dir']}/targets_sequence.fasta")
