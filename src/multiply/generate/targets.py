@@ -26,6 +26,7 @@ class Target:
     length: int = field(default=0, compare=False, repr=False)
     pad_start: int = field(default=0, compare=False, repr=False)
     pad_end: int = field(default=0, compare=False, repr=False)
+    clearance_bp: int = field(default=0, compare=False, repr=False)
     seq: str = field(default="", compare=False, repr=False)
 
     @classmethod
@@ -57,17 +58,33 @@ class Target:
         self.length = self.end - self.start
         self.name = self.ID if not self.name else self.name
 
-    def calc_pads(self, max_size_bp):
+    @property
+    def clear_start(self):
+        """Start of the interval primers must stay outside (target plus clearance)."""
+        return self.start - self.clearance_bp
+
+    @property
+    def clear_length(self):
+        """Length of the interval primers must stay outside."""
+        return self.length + 2 * self.clearance_bp
+
+    def calc_pads(self, max_size_bp, clearance_bp=None):
         """
         Compute the start and end position of the `pads`, these define
         the maximum extent of the region inside of which primers may be 
         found
 
+        `clearance_bp` keeps every primer at least that far from the target,
+        so the whole target sits in the amplicon body and is never under a
+        primer. Pads are measured from the cleared interval.
+
         """
 
+        if clearance_bp is not None:
+            self.clearance_bp = clearance_bp
         pad = max_size_bp / 2
-        self.pad_start = int(self.start - pad)
-        self.pad_end = int(self.end + pad)
+        self.pad_start = int(self.start - self.clearance_bp - pad)
+        self.pad_end = int(self.end + self.clearance_bp + pad)
 
         return self
 
@@ -114,7 +131,52 @@ class TargetSet:
         self.targets = targets.copy()
         self.targets.sort()
 
-    def check_size_compatible(self, max_size_bp):
+    def split_long_targets(self, max_target_bp):
+        """
+        Split targets longer than `max_target_bp` into equal, abutting
+        sub-targets, so long regions can be tiled by several amplicons.
+
+        Every base of the original target falls inside exactly one sub-target,
+        and primer3 requires each amplicon to span its whole sub-target with
+        clearance. Coverage of the original interval therefore holds by
+        construction, with no overlap between amplicons required.
+
+        Sub-targets are named ``<ID>_s<i>`` / ``<name>_s<i>`` (i from 0).
+        Targets at or under the limit are left untouched.
+
+        params
+            max_target_bp: int
+                Longest sub-target permitted, in basepairs.
+
+        """
+        if max_target_bp < 1:
+            raise ValueError(f"max_target_bp must be positive, got {max_target_bp}")
+
+        out = []
+        for target in self.targets:
+            if target.length <= max_target_bp:
+                out.append(target)
+                continue
+            n_parts = -(-target.length // max_target_bp)
+            for i in range(n_parts):
+                lo = target.start + (target.length * i) // n_parts
+                hi = target.start + (target.length * (i + 1)) // n_parts
+                out.append(
+                    Target(
+                        chrom=target.chrom,
+                        start=lo,
+                        end=hi,
+                        ID=f"{target.ID}_s{i}",
+                        name=f"{target.name}_s{i}",
+                        strand=target.strand,
+                    )
+                )
+        self.targets = out
+        self.targets.sort()
+
+        return self
+
+    def check_size_compatible(self, max_size_bp, clearance_bp=0):
         """
         Check that all none of the targets are larger than
         the maximum amplicon size `max_size_bp`
@@ -135,9 +197,11 @@ class TargetSet:
         # Store maximum amplicon size, used in `.calc_pads()`
         self.max_size_bp = max_size_bp
 
-        # Find targets that are too large
+        # Find targets that are too large, counting the clearance either side
         too_large = [
-            target for target in self.targets if target.length > self.max_size_bp
+            target
+            for target in self.targets
+            if target.length + 2 * clearance_bp > self.max_size_bp
         ]
 
         # Throw warning
@@ -188,7 +252,7 @@ class TargetSet:
                 right.pad_start = middle_point + 1
                 left.pad_end = middle_point
 
-    def calc_pads(self, max_size_bp=None):
+    def calc_pads(self, max_size_bp=None, clearance_bp=0):
         """Calculate pads consistently across all targets"""
 
         if max_size_bp is not None:
@@ -196,7 +260,7 @@ class TargetSet:
 
         # First, calculate all pads independently
         for target in self.targets:
-            target.calc_pads(max_size_bp=self.max_size_bp)
+            target.calc_pads(max_size_bp=self.max_size_bp, clearance_bp=clearance_bp)
 
         # Adjust any overlapping pads, if necesssary
         self._adjust_overlapping_pads()

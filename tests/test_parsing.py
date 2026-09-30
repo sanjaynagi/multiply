@@ -68,3 +68,29 @@ def test_parse_parameters_valid(design_path, result):
     assert len(params["target_ids"]) == result.n_targets
     assert len(params["primer3_settings"]) == result.n_primer3_settings
 
+
+
+def _write_design(tmp_path, amplicons_extra):
+    text = open(f"{design_dir}/pf-default.ini").read()
+    marker = "[Amplicons]"
+    assert marker in text
+    path = tmp_path / "d.ini"
+    path.write_text(text.replace(marker, marker + "\n" + amplicons_extra, 1))
+    return str(path)
+
+
+def test_splitting_and_clearance_default_to_off():
+    params = parse_parameters(f"{design_dir}/pf-default.ini")
+    assert params["target_clearance_bp"] == 0
+    assert params["max_target_bp"] is None
+
+
+def test_splitting_and_clearance_are_parsed(tmp_path):
+    params = parse_parameters(_write_design(tmp_path, "target_clearance_bp = 150\nmax_target_bp = 1500"))
+    assert params["target_clearance_bp"] == 150
+    assert params["max_target_bp"] == 1500
+
+
+def test_sub_target_that_no_amplicon_could_span_is_rejected(tmp_path):
+    with pytest.raises(DesignFileError):
+        parse_parameters(_write_design(tmp_path, "target_clearance_bp = 500\nmax_target_bp = 5000"))

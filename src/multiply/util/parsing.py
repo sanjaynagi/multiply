@@ -248,6 +248,27 @@ def add_amplicons(config, params, min_size_bp=50, max_size_bp=10000):
         )
         params["max_size_bp"] = max_size_bp
 
+    # Keep primers this far from the target, so it is never under a primer
+    params["target_clearance_bp"] = config.getint(
+        "Amplicons", "target_clearance_bp", fallback=0
+    )
+    if params["target_clearance_bp"] < 0:
+        raise DesignFileError("In [Amplicons], target_clearance_bp must be >= 0.")
+
+    # Split targets longer than this into abutting sub-targets (None: reject them)
+    params["max_target_bp"] = (
+        config.getint("Amplicons", "max_target_bp")
+        if config.has_option("Amplicons", "max_target_bp")
+        else None
+    )
+    if params["max_target_bp"] is not None:
+        needed = params["max_target_bp"] + 2 * params["target_clearance_bp"]
+        if needed > params["max_size_bp"]:
+            raise DesignFileError(
+                f"In [Amplicons], max_target_bp + 2 * target_clearance_bp = {needed} "
+                f"exceeds max_size_bp = {params['max_size_bp']}; no amplicon could span it."
+            )
+
     # primer3 settings
     if config.has_option("Amplicons", "primer3_settings"):
         params["primer3_settings"] = [
@@ -276,6 +297,8 @@ def add_snpcheck(config, params):
       - maf_threshold: float, default 0.05
       - three_prime_bp: int, default 5
       - region_pad_bp: int, default 0
+      - cache_dir: directory for cached allele-frequency tracks
+        (default: <output>/snpcheck/af_cache)
     """
     if not config.has_section("SNPCheck"):
         params["snpcheck"] = {"backend": "bedtools"}
@@ -307,6 +330,8 @@ def add_snpcheck(config, params):
         snpcheck["three_prime_bp"] = config.getint(section, "three_prime_bp")
     if config.has_option(section, "region_pad_bp"):
         snpcheck["region_pad_bp"] = config.getint(section, "region_pad_bp")
+    if config.has_option(section, "cache_dir"):
+        snpcheck["cache_dir"] = config.get(section, "cache_dir").strip()
 
     params["snpcheck"] = snpcheck
     return params

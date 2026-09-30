@@ -68,6 +68,7 @@ def print_parameters(design, params):
         print(f"    F tail: {params['F_tail']}")
         print(f"    R tail: {params['R_tail']}")
     print(f"  Amplicon size range: {params['min_size_bp']}-{params['max_size_bp']}bp")
+    print(f"  Target clearance: {params['target_clearance_bp']}bp; split targets over: {params['max_target_bp']}")
     print(f"  primer3 settings: {', '.join(params['primer3_settings'])}")
     print(f"  Output directory: {params['output_dir']}")
     print("Done.\n")

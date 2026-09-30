@@ -127,6 +127,7 @@ def _snpcheck_malariagen(primer_csv, backend_config):
     maf_threshold = float(backend_config.get("maf_threshold", 0.05))
     three_prime_bp = int(backend_config.get("three_prime_bp", 5))
     region_pad_bp = int(backend_config.get("region_pad_bp", 0))
+    cache_dir = backend_config.get("cache_dir") or f"{input_dir}/snpcheck/af_cache"
 
     print("Cohort:")
     print(f"  species       = {species}")
@@ -136,11 +137,14 @@ def _snpcheck_malariagen(primer_csv, backend_config):
     print(f"  maf_threshold = {maf_threshold}")
     print(f"  three_prime_bp = {three_prime_bp}")
     print(f"  region_pad_bp = {region_pad_bp}")
+    print(f"  cache_dir     = {cache_dir}")
     print(f"  primers       = {len(primer_df)}")
 
     print("Fetching SNP calls + scoring primers...")
+    # `multiply generate` reports 0-based primer starts (primer3 offset plus the
+    # 0-based BED pad start); the scorer takes 1-based sense coordinates.
     scores_df = score_primers_by_cohort(
-        primer_df=primer_df,
+        primer_df=primer_df.assign(start=primer_df["start"] + 1),
         species=species,
         sample_sets=sample_sets,
         taxa=taxa,
@@ -148,6 +152,7 @@ def _snpcheck_malariagen(primer_csv, backend_config):
         maf_threshold=maf_threshold,
         three_prime_bp=three_prime_bp,
         region_pad_bp=region_pad_bp,
+        cache_dir=cache_dir,
     )
 
     output_path = f"{output_dir}/table.candidate_primers.snp_counts.csv"

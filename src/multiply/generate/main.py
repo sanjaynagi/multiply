@@ -30,9 +30,9 @@ def _primer3_one(args):
     runner.set_target(
         ID=target.ID,
         seq=target.seq,
-        start=target.start,
+        start=target.clear_start,
         pad_start=target.pad_start,
-        length=target.length,
+        length=target.clear_length,
     )
     runner.run(output_dir=output_dir)
     primer_pairs = load_primer_pairs_from_primer3_output(
@@ -86,10 +86,15 @@ def generate(design):
     # MERGE
     print("  Merging genes and regions...")
     targets = genes + regions
+    clearance_bp = params["target_clearance_bp"]
+    target_set = TargetSet(targets)
+    if params["max_target_bp"] is not None:
+        target_set.split_long_targets(params["max_target_bp"])
+        print(f"  {len(target_set.targets)} target(s) after splitting at {params['max_target_bp']}bp.")
     target_set = (
-        TargetSet(targets)
-        .check_size_compatible(params["max_size_bp"])
-        .calc_pads()
+        target_set
+        .check_size_compatible(params["max_size_bp"], clearance_bp=clearance_bp)
+        .calc_pads(clearance_bp=clearance_bp)
         .extract_seqs(genome.fasta_path, include_pads=True)
         .to_csv(f"{params['output_dir']}/table.targets_overview.csv")
         .to_fasta(f"{params['output_dir']}/targets_sequence.fasta")
