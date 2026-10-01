@@ -25,3 +25,12 @@ def test_vetted_primers_keep_their_values_and_order():
     out = complete_summary(_summary(), ["a_u0_R", "a_u0_F"])
     assert list(out["primer_name"]) == ["a_u0_R", "a_u0_F"]
     assert list(out["predicted_bound"]) == [7, 2]
+
+
+def test_select_accepts_custom_cost_files():
+    import inspect
+
+    from multiply.select.main import select
+
+    params = inspect.signature(select).parameters
+    assert {"individual_costs", "pairwise_costs"} <= set(params)

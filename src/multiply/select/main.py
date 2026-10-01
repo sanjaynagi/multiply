@@ -22,7 +22,7 @@ N_SELECT = 3
 MAX_PRIMERS_FOR_PAIRWISE_PDF = 250
 
 
-def select(result_dir, algorithm):
+def select(result_dir, algorithm, individual_costs=None, pairwise_costs=None):
     """
     Select optimal multiplex(es) from a set of candidate primers
 
@@ -31,6 +31,12 @@ def select(result_dir, algorithm):
 
     Information about primer quality, primer dimers, and off-target
     binding sites are fed into a cost function, which is then minimised.
+
+    `individual_costs` and `pairwise_costs` are paths to cost-weight `.ini` files
+    that replace the defaults in `settings/select/`. The pairwise (dimer) term is
+    a sum over every other pair in the multiplex, so its influence grows with the
+    number of amplicons; for panels much larger than the defaults were set for,
+    scale its weight down (about 10 / n_pairs worked well for ~500 pairs).
 
     """
     # PARSE CLI
@@ -46,7 +52,7 @@ def select(result_dir, algorithm):
 
     # CREATE INDIVIDUAL COSTS
     print("Preparing inputs to cost function...")
-    indv_factory = IndividualCostFactory(INDV_INI_PATH, result_dir)
+    indv_factory = IndividualCostFactory(individual_costs or INDV_INI_PATH, result_dir)
     indv_costs = [
         indv_cost.collapse_to_per_pair().normalise_costs()
         for indv_cost in indv_factory.get_individual_costs()
@@ -54,7 +60,7 @@ def select(result_dir, algorithm):
     print(f"  Individual costs: {', '.join([i.cost_name for i in indv_costs])}")
 
     # CREATE PAIRWISE COSTS
-    pairwise_factory = PairwiseCostFactory(PAIR_INI_PATH, result_dir)
+    pairwise_factory = PairwiseCostFactory(pairwise_costs or PAIR_INI_PATH, result_dir)
     pairwise_costs = [
         pair_cost.collapse_to_per_pair().normalise_costs()
         for pair_cost in pairwise_factory.get_pairwise_costs()

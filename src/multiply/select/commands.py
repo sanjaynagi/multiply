@@ -17,7 +17,19 @@ from .selectors import selector_collection
     default="Greedy",
     help="Search algorithm for optimal multiplex. Note that `BruteForce` is exceedingly slow for large multiplexes.",
 )
-def select(result_dir, algorithm):
+@click.option(
+    "--individual-costs",
+    type=click.Path(exists=True),
+    default=None,
+    help="Cost-weight .ini replacing settings/select/individual_costs.ini.",
+)
+@click.option(
+    "--pairwise-costs",
+    type=click.Path(exists=True),
+    default=None,
+    help="Cost-weight .ini replacing settings/select/pairwise_costs.ini.",
+)
+def select(result_dir, algorithm, individual_costs, pairwise_costs):
     """
     Select optimal multiplex(es) from a set of candidate primers
 
@@ -30,4 +42,4 @@ def select(result_dir, algorithm):
     """
     from .main import select
 
-    select(result_dir, algorithm)
+    select(result_dir, algorithm, individual_costs, pairwise_costs)
