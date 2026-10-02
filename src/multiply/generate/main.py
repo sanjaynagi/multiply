@@ -138,7 +138,9 @@ def generate(design):
 
         # Reduce to unique primer pairs, and give names
         # this definitely can be cleaned
-        uniq_primer_pairs = set(all_primer_pairs)
+        # Sorted, not a bare set: set order depends on the process hash seed, so
+        # pair names (`..._u3`) would differ between runs of the same design.
+        uniq_primer_pairs = sorted(set(all_primer_pairs), key=lambda pair: pair.pair_id)
         for ix, pair in enumerate(uniq_primer_pairs):
             pair.give_primers_names(primer_code=params["primer_code"], primer_ix=ix)
 

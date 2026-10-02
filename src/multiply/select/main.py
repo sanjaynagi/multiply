@@ -22,7 +22,7 @@ N_SELECT = 3
 MAX_PRIMERS_FOR_PAIRWISE_PDF = 250
 
 
-def select(result_dir, algorithm, individual_costs=None, pairwise_costs=None):
+def select(result_dir, algorithm, individual_costs=None, pairwise_costs=None, seed=None):
     """
     Select optimal multiplex(es) from a set of candidate primers
 
@@ -32,7 +32,7 @@ def select(result_dir, algorithm, individual_costs=None, pairwise_costs=None):
     Information about primer quality, primer dimers, and off-target
     binding sites are fed into a cost function, which is then minimised.
 
-    `individual_costs` and `pairwise_costs` are paths to cost-weight `.ini` files
+    `seed` makes the greedy search reproducible. `individual_costs` and `pairwise_costs` are paths to cost-weight `.ini` files
     that replace the defaults in `settings/select/`. The pairwise (dimer) term is
     a sum over every other pair in the multiplex, so its influence grows with the
     number of amplicons; for panels much larger than the defaults were set for,
@@ -78,7 +78,7 @@ def select(result_dir, algorithm, individual_costs=None, pairwise_costs=None):
     print(f"  Using algorithm: {algorithm}")
     # Run
     selector = selector_collection[algorithm](primer_df, cost_function)
-    multiplexes = selector.run()
+    multiplexes = selector.run(seed=seed) if algorithm == "Greedy" else selector.run()
 
     # Prepare to explore results
     explorer = MultiplexExplorer(primer_df, multiplexes)

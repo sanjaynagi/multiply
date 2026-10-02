@@ -29,7 +29,13 @@ from .selectors import selector_collection
     default=None,
     help="Cost-weight .ini replacing settings/select/pairwise_costs.ini.",
 )
-def select(result_dir, algorithm, individual_costs, pairwise_costs):
+@click.option(
+    "--seed",
+    type=int,
+    default=None,
+    help="Seed the greedy search so repeated runs choose the same multiplex.",
+)
+def select(result_dir, algorithm, individual_costs, pairwise_costs, seed):
     """
     Select optimal multiplex(es) from a set of candidate primers
 
@@ -42,4 +48,4 @@ def select(result_dir, algorithm, individual_costs, pairwise_costs):
     """
     from .main import select
 
-    select(result_dir, algorithm, individual_costs, pairwise_costs)
+    select(result_dir, algorithm, individual_costs, pairwise_costs, seed)
