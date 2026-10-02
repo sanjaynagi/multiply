@@ -3,7 +3,7 @@ import json
 import pandas as pd
 
 from .runner import BlastRunner
-from .annotator import BlastResultsAnnotator
+from .annotator import BlastResultsAnnotator, complete_summary
 from .offtarget import AmpliconFinder
 from multiply.download.collection import genome_collection
 from multiply.util.printing import print_header, print_footer
@@ -73,6 +73,12 @@ def blast(primer_csv, genome_name):
     annotator.summarise_by_primer(
         f"{output_dir}/table.blast.candidate_primers.summary.csv"
     )
+    summary_path = f"{output_dir}/table.blast.candidate_primers.summary.csv"
+    summary = pd.read_csv(summary_path)
+    n_unvetted = len(set(primer_df["primer_name"]) - set(summary["primer_name"]))
+    if n_unvetted:
+        print(f"  {n_unvetted} primer(s) had no BLAST hit at all; charging them the worst observed value.")
+        complete_summary(summary, primer_df["primer_name"]).to_csv(summary_path, index=False)
     print(f"  Found {blast_df.shape[0]} BLAST hits.")
     print("Done.\n")
 
