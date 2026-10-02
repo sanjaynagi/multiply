@@ -29,6 +29,7 @@ from .multiplex import Multiplex, MultiplexResults
 @njit(cache=True)
 def _greedy_search_njit(
     N,
+    seed,
     cand_indices_flat,
     cand_starts,
     cand_lens,
@@ -39,6 +40,11 @@ def _greedy_search_njit(
     n_total = indv_arr.shape[0]
     all_multiplexes = np.empty((N, n_targets), dtype=np.int64)
     all_costs = np.empty(N, dtype=np.float64)
+
+    # Seeding inside the jitted function seeds numba's own generator, not
+    # numpy's. A negative seed leaves it unseeded (non-reproducible).
+    if seed >= 0:
+        np.random.seed(seed)
 
     for it in range(N):
         # Per-iteration scratch — local to this thread / iteration.
@@ -185,9 +191,12 @@ class GreedySearch(MultiplexSelector):
 
     """
 
-    def run(self, N=10_000):
+    def run(self, N=10_000, seed=None):
         """
         Run a greedy search algorithm for the lowest cost multiplex.
+
+        Pass `seed` for a reproducible search: without it, repeated runs on the
+        same inputs choose different pairs wherever candidates nearly tie.
 
         Each iteration shuffles target order, then walks the targets choosing
         the candidate primer-pair that minimises the running multiplex cost
@@ -214,7 +223,7 @@ class GreedySearch(MultiplexSelector):
         # Build target → candidate primer-pair indices.
         ix_lookup = self.cost_function._primer_pair_ix
         target_pairs = {
-            target_id: list(set(target_df["pair_name"]))
+            target_id: sorted(set(target_df["pair_name"]))
             for target_id, target_df in self.primer_df.groupby("target_id")
         }
         target_ids = list(target_pairs)
@@ -241,6 +250,7 @@ class GreedySearch(MultiplexSelector):
         print(f"  Running {N} parallel greedy iterations (numba)...")
         all_multiplexes, all_costs = _greedy_search_njit(
             N,
+            -1 if seed is None else int(seed),
             cand_indices_flat,
             cand_starts,
             cand_lens,

@@ -18,7 +18,7 @@ PAIR_INI_PATH = f"{ROOT_DIR}/settings/select/pairwise_costs.ini"
 N_SELECT = 3
 
 
-def select(result_dir, algorithm):
+def select(result_dir, algorithm, seed=None):
     """
     Select optimal multiplex(es) from a set of candidate primers
 
@@ -27,6 +27,8 @@ def select(result_dir, algorithm):
 
     Information about primer quality, primer dimers, and off-target
     binding sites are fed into a cost function, which is then minimised.
+
+    `seed` makes the greedy search reproducible.
 
     """
     # PARSE CLI
@@ -68,7 +70,7 @@ def select(result_dir, algorithm):
     print(f"  Using algorithm: {algorithm}")
     # Run
     selector = selector_collection[algorithm](primer_df, cost_function)
-    multiplexes = selector.run()
+    multiplexes = selector.run(seed=seed) if algorithm == "Greedy" else selector.run()
 
     # Prepare to explore results
     explorer = MultiplexExplorer(primer_df, multiplexes)
