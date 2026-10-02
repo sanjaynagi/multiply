@@ -82,7 +82,7 @@ class BlastResultsAnnotator:
                 primer_pair_name=qseqid[:-2],
                 target_name=qseqid.split("_")[0],
                 total_alignments=qseqid_df.shape[0],
-                **qseqid_df[self.annotations].sum().to_dict(),
+                **qseqid_df[list(self.annotations.keys())].sum().to_dict(),  # Use keys as column names
             )
             for qseqid, qseqid_df in self.blast_df.groupby("qseqid")
         ]
@@ -95,3 +95,40 @@ class BlastResultsAnnotator:
         # Optionally write
         if output_path is not None:
             self.blast_primer_df.to_csv(output_path, index=False)
+
+
+def complete_summary(summary_df, primer_names):
+    """
+    Give every candidate primer a row in a per-primer BLAST summary.
+
+    BLAST can return no hit at all for a primer (it should at least find its
+    own site, but short low-complexity primers are filtered out). Such a primer
+    is absent from the summary, and a missing value reads as "no off-target
+    sites", which makes the primer look better than every primer that was
+    actually vetted. Charge it the worst value observed instead, so a primer
+    that could not be checked is never preferred.
+
+    params
+        summary_df: pandas DataFrame
+            Per-primer summary with a `primer_name` column and numeric counts.
+        primer_names: iterable of str
+            Every candidate primer.
+
+    returns
+        pandas DataFrame
+            One row per primer in `primer_names`, in that order.
+
+    """
+    import pandas as pd
+
+    summary_df = summary_df.set_index("primer_name")
+    numeric = summary_df.select_dtypes("number").columns
+    worst = summary_df[numeric].max()
+    out = summary_df.reindex(list(primer_names))
+    missing = out[numeric[0]].isna()
+    for column in numeric:
+        out.loc[missing, column] = worst[column]
+    out.loc[missing, "primer_pair_name"] = [n[:-2] for n in out.index[missing]]
+    out.loc[missing, "target_name"] = [n.split("_")[0] for n in out.index[missing]]
+    out[numeric] = out[numeric].astype(summary_df[numeric].dtypes.to_dict())
+    return out.reset_index(names="primer_name")

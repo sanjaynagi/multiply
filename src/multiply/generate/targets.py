@@ -66,7 +66,8 @@ class Target:
         """
 
         pad = max_size_bp / 2
-        self.pad_start = int(self.start - pad)
+        # A target near the start of a contig cannot have a pad before base 0
+        self.pad_start = max(0, int(self.start - pad))
         self.pad_end = int(self.end + pad)
 
         return self
@@ -79,18 +80,29 @@ class Target:
         """
 
         self.pads_included = include_pads
+
+        # Define start and end of sequence to extract
+        if include_pads:
+            # `pad_start` can legitimately be 0 (target near a contig start), so
+            # only `pad_end` tells us whether `.calc_pads()` has run.
+            if not self.pad_end:
+                raise ValueError(
+                    "If `include_pads` is True, must run `.calc_pads()` first."
+                )
+            start, end = self.pad_start, self.pad_end
+        else:
+            start, end = self.start, self.end
+
+        if end <= start:
+            # Neighbouring targets' pads were adjusted until none was left;
+            # fetching would return an empty sequence and primer3 would fail
+            # with an unhelpful "Missing SEQUENCE tag".
+            raise TargetPositionError(
+                f"{self.ID}: no room left for primers (pad region {start}-{end}); "
+                "its pads were squeezed by neighbouring targets."
+            )
+
         with pysam.FastaFile(reference_fasta_path) as fasta:
-
-            # Define start and end of sequence to extract
-            if include_pads:
-                if not self.pad_start or not self.pad_end:
-                    raise ValueError(
-                        "If `include_pads` is True, must run `.calc_pads()` first."
-                    )
-                start, end = self.pad_start, self.pad_end
-            else:
-                start, end = self.start, self.end
-
             self.seq = fasta.fetch(self.chrom, start, end)
 
         return self

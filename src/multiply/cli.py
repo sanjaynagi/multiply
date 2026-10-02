@@ -1,3 +1,11 @@
+import matplotlib
+
+# Force a non-interactive backend before any sub-module imports pyplot.
+# Some downstream packages (e.g. malariagen_data progress bars) pull in
+# IPython, which then makes matplotlib try to attach a GUI backend to a
+# non-existent IPython kernel and crashes plotting steps.
+matplotlib.use("Agg", force=True)
+
 import click
 from multiply.download.commands import download
 from multiply.generate.commands import generate

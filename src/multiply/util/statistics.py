@@ -13,7 +13,7 @@ def get_homopolymer_runs(seq, l_max=None):
     """
 
     # Store
-    h = np.zeros(len(seq), "int8")
+    h = np.zeros(len(seq), "int32")
     h[:] = -1
 
     # Initialise
@@ -72,7 +72,7 @@ def get_array_encoding(seq):
     a = np.zeros((4, n))
     dt = {"A" : 0, "T" : 1, "C" : 2, "G" : 3, "[":np.nan, "]":np.nan}
     for i, base in enumerate(seq):
-        e = dt[base]
+        e = dt.get(base.upper(), np.nan)
         if e == e:
             a[e, i] = 1
 

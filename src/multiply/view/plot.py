@@ -212,11 +212,11 @@ class PrimerPlotter:
             F_row = pair_df.query("direction == 'F'")
             R_row = pair_df.query("direction == 'R'")
 
-            F_start = F_row["start"]
-            F_end = F_start + F_row["length"]
+            F_start = F_row["start"].values[0]
+            F_end = F_start + F_row["length"].values[0]
 
-            R_start = R_row["start"]
-            R_end = R_start - R_row["length"]
+            R_start = R_row["start"].values[0]
+            R_end = R_start - R_row["length"].values[0]
 
             # Forward
             ax.plot([F_start, F_end], [ix, ix], lw=2.5, color=self.col_dt[pair_name])
