@@ -72,6 +72,7 @@ class BlastRunner:
         cmd += f" -word_size {word_size}"
         cmd += f" -outfmt 11"
         cmd += f" -out {output_archive}"
+        cmd += f" -num_threads {os.cpu_count() or 4}"
 
         # Run
         subprocess.run(cmd, check=True, shell=True)
