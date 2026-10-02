@@ -1,3 +1,5 @@
+import os
+import concurrent.futures
 import pandas as pd
 
 from multiply.util.printing import print_header, print_footer, print_parameters
@@ -9,6 +11,34 @@ from multiply.download.collection import genome_collection
 from multiply.generate.targets import Target, TargetSet
 from multiply.generate.primer3 import Primer3Runner
 from multiply.generate.primers import load_primer_pairs_from_primer3_output
+
+
+def _primer3_one(args):
+    """Run primer3 for a single (setting, target) pair; designed for thread pool.
+
+    Each worker constructs its own ``Primer3Runner`` to avoid sharing the
+    runner's mutable state across threads. ``primer3_core`` is a subprocess
+    so the GIL doesn't bottleneck — threads (rather than processes) are
+    enough and avoid fork overhead.
+    """
+    setting_name, target, output_dir, min_size_bp, max_size_bp = args
+    runner = Primer3Runner()
+    runner.load_primer3_settings(setting_name)
+    runner.set_amplicon_size_ranges(
+        min_size_bp=min_size_bp, max_size_bp=max_size_bp
+    )
+    runner.set_target(
+        ID=target.ID,
+        seq=target.seq,
+        start=target.start,
+        pad_start=target.pad_start,
+        length=target.length,
+    )
+    runner.run(output_dir=output_dir)
+    primer_pairs = load_primer_pairs_from_primer3_output(
+        runner.output_path, add_target=target
+    )
+    return target.ID, primer_pairs
 
 
 def generate(design):
@@ -66,39 +96,32 @@ def generate(design):
     )
     print("Done.\n")
 
-    # RUN PRIMER3
+    # RUN PRIMER3 — parallel across (setting, target) pairs.
     print("Running primer3...")
     primer3_output_dir = produce_dir(params["output_dir"], "primer3")
-    primer3_runner = Primer3Runner()
 
-    # Storage
     primer_pair_dt = {target.ID: [] for target in target_set.targets}
 
-    # Iterate over settings
-    for primer3_setting in params["primer3_settings"]:
-        print(f"  Generating primers using {primer3_setting} settings...")
-
-        primer3_runner.load_primer3_settings(primer3_setting)
-        primer3_runner.set_amplicon_size_ranges(
-            min_size_bp=params["min_size_bp"], max_size_bp=params["max_size_bp"]
+    jobs = [
+        (
+            primer3_setting,
+            target,
+            primer3_output_dir,
+            params["min_size_bp"],
+            params["max_size_bp"],
         )
+        for primer3_setting in params["primer3_settings"]
+        for target in target_set.targets
+    ]
 
-        # Iterate over targets
-        for target in target_set.targets:
-            primer3_runner.set_target(
-                ID=target.ID,
-                seq=target.seq,
-                start=target.start,
-                pad_start=target.pad_start,
-                length=target.length,
-            )
-            primer3_runner.run(output_dir=primer3_output_dir)
-
-            # Store
-            primer_pairs = load_primer_pairs_from_primer3_output(
-                primer3_runner.output_path, add_target=target
-            )
-            primer_pair_dt[target.ID].extend(primer_pairs)
+    n_workers = os.cpu_count() or 4
+    print(
+        f"  Dispatching {len(jobs)} primer3 jobs ({len(params['primer3_settings'])} settings × {len(target_set.targets)} targets) "
+        f"across {n_workers} threads..."
+    )
+    with concurrent.futures.ThreadPoolExecutor(max_workers=n_workers) as executor:
+        for target_id, primer_pairs in executor.map(_primer3_one, jobs):
+            primer_pair_dt[target_id].extend(primer_pairs)
     print("Done.\n")
 
     # REDUCE TO UNIQUE PAIRS

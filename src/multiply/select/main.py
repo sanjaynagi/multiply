@@ -77,7 +77,7 @@ def select(result_dir, algorithm):
     # Benchmark with random algorithm
     print("Benchmarking search performance with random search...")
     rnd_selector = selector_collection["Random"](primer_df, cost_function)
-    rnd_multiplexes = rnd_selector.run(N=len(explorer.uniq_multiplexes))
+    rnd_multiplexes = rnd_selector.run(N=explorer.N_uniq)
 
     # Prepare to explore random results
     rnd_explorer = MultiplexExplorer(primer_df, rnd_multiplexes)
@@ -85,10 +85,11 @@ def select(result_dir, algorithm):
 
     # EXPLORING RESULTS
     print("Exploring search results...")
-    algo_costs = [
-        m.cost for m in explorer.uniq_multiplexes
-    ]  # NB: only looking at unique
-    rnd_costs = [m.cost for m in rnd_explorer.uniq_multiplexes]
+    # `uniq_costs` is a numpy array kept by MultiplexExplorer alongside the
+    # de-duplicated multiplex set; using it directly avoids materialising
+    # ~N_uniq Multiplex Python objects just to read their cost field.
+    algo_costs = explorer.uniq_costs
+    rnd_costs = rnd_explorer.uniq_costs
     print(f"  {'Algorithm':>10}  {'Mean Cost':>10}  {'Lowest Cost':>10}")
     print(
         f"  {algorithm:>10}  {np.mean(algo_costs):>10.3f}  {np.min(algo_costs):>10.3f}"
