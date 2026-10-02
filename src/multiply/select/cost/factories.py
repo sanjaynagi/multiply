@@ -147,6 +147,20 @@ class PairwiseCostFactory:
         pairwise_costs = []
         for section in self._config.sections():
 
+            # Geometry costs are computed from the candidate table, not read
+            if self._config.get(section, "type", fallback="") == "amplicon_overlap":
+                from .geometry import AmpliconOverlapCost, amplicon_overlap_matrix
+
+                candidates = pd.read_csv(f"{self.result_dir}/table.candidate_primers.csv")
+                pairwise_costs.append(
+                    AmpliconOverlapCost(
+                        cost_name=section,
+                        primer_values=amplicon_overlap_matrix(candidates),
+                        weight=self._config.getfloat(section, "weight"),
+                    )
+                )
+                continue
+
             # Create cost
             pairwise_cost = self.create_cost(
                 cost_name=section,
