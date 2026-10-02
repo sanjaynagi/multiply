@@ -44,7 +44,7 @@ def test_greedy_search_costs_equal_the_cost_of_the_multiplex_it_returns():
     starts = np.arange(0, n, per, dtype=np.int64)
     lens = np.full(n_targets, per, dtype=np.int64)
 
-    chosen, costs = _greedy_search_njit(50, flat, starts, lens, indv, pairwise)
+    chosen, costs = _greedy_search_njit(50, -1, flat, starts, lens, indv, pairwise)
 
     for row, cost in zip(chosen, costs, strict=True):
         assert len(set(row)) == n_targets                      # one pair per target

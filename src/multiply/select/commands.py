@@ -17,7 +17,13 @@ from .selectors import selector_collection
     default="Greedy",
     help="Search algorithm for optimal multiplex. Note that `BruteForce` is exceedingly slow for large multiplexes.",
 )
-def select(result_dir, algorithm):
+@click.option(
+    "--seed",
+    type=int,
+    default=None,
+    help="Seed the greedy search so repeated runs choose the same multiplex.",
+)
+def select(result_dir, algorithm, seed):
     """
     Select optimal multiplex(es) from a set of candidate primers
 
@@ -30,4 +36,4 @@ def select(result_dir, algorithm):
     """
     from .main import select
 
-    select(result_dir, algorithm)
+    select(result_dir, algorithm, seed)
